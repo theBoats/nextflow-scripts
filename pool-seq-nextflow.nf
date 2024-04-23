@@ -29,6 +29,32 @@ params.genome = "/fs03/ha66/references/STAR-index2/iGenomes/Mus_musculus/UCSC/mm
 
 fastqFiles = params.fastqFolder + "/*L00${(1..params.lanes)}*_R1*.fastq.gz"
 
+
+if (params.help) {
+  log.info """
+
+  Nextflow requires java version >= 11 and <= 18. Check available modules: `module avail java`
+  This script requires a version of python with pandas installed.
+
+  Usage:
+    nextflow run pool-seq-nextflow.nf --lanes 4 --genome 'mm9' --fastqFolder "/fs03/ha66/graham/temp/temp_fastq"
+
+  Input:
+    * --lanes: Number of lanes run on Illumina sequencer, between 1 and 4
+    * --genome: Currently only mm9 is implemented and is default
+    * --fastqFolder: Path to a directory containing all of the fastqFiles
+    * --help: Show this message
+
+
+  """
+  exit 0
+}
+
+
+
+// PROCESSES
+
+
 process COPY_RAW_DATA {
 
   // DOCSTRING: copies raw fastqfiles to output directory
