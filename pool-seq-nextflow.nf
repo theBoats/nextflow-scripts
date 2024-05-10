@@ -27,9 +27,17 @@ Consider parameterizing STAR threads
 params.lanes = 4
 params.fastqFolder = "/fs03/ha66/graham/temp/temp_fastq"
 params.genome = "/fs03/ha66/references/STAR-index2/iGenomes/Mus_musculus/UCSC/mm9"
+
+// Need to explicitly code working and publish directories on PBS !! NOT SURE WHY
+// NOT FIXED. STILL WRITING TO HOME FOLDER
+
+// global params
+workDir = params.outDir +"/work"
+pubDir = params.outDir
+fastqFiles = params.fastqFolder + "/**/*L00${(1..params.lanes)}*_R1*.fastq.gz"
+// params.outDir = "~"
 params.help = false
 
-fastqFiles = params.fastqFolder + "/**/*L00${(1..params.lanes)}*_R1*.fastq.gz"
 
 
 if (params.help) {
@@ -46,7 +54,7 @@ if (params.help) {
   `module load java/17.0.4.1`
   `module load python/3.9.13`
 
-  Make sire nextflow is in your PATH or execute from:
+  Make sure nextflow is in your PATH or execute from:
   `/mnt/lustre/working/lab_kateg/grahamM/software/nextflow`
 
 
@@ -73,7 +81,9 @@ process COPY_RAW_DATA {
 
   // DOCSTRING: copies raw fastqfiles to output directory
 
-  publishDir 'sequence/fastq_files', mode: 'copy'
+  label 'small'
+
+  publishDir "sequence/fastq_files", mode: 'copy'
 
   input:
   path(file)
@@ -92,8 +102,10 @@ process COPY_RAW_DATA {
 process CONCAT_FASTQ {
   // concatenates multiple fastq files from separate lanes
 
+  label 'small'
+
   // files are published relative to script directory
-  publishDir 'sequence/concatenated_fastq', mode: 'copy'
+  publishDir "sequence/concatenated_fastq", mode: 'copy'
 
   input:
   tuple val(sampleID), path(files)
@@ -109,9 +121,11 @@ process CONCAT_FASTQ {
 
 process FASTQC {
 
+  label 'small'
+
   module 'fastqc/0.12.1'
 
-  publishDir 'sequence/fastqc', mode: 'copy'
+  publishDir "sequence/fastqc", mode: 'copy'
   
   input:
   tuple val(sampleID), path(concatenated_fastq)
@@ -127,49 +141,13 @@ process FASTQC {
 }
 
 
-// Variables for TRIM m3
-// polyA="/usr/local/bbmap/38.81/resources/polyA.fa.gz"
-// polyG="/fs03/ha66/graham/common_scripts/bbmap/polyG.fa"
-// adapters="/usr/local/bbmap/38.81/resources/adapters.fa"
-// poolseq_oligos="/fs03/ha66/graham/common_scripts/bbmap/poolseq-oligos.fa"
-
-// Variables for TRIM QIMR
-adapters="/mnt/lustre/working/lab_kateg/grahamM/software/bbmap/38.81/resources/adapters.fa"
-polyA="/mnt/lustre/working/lab_kateg/grahamM/software/bbmap/38.81/resources/polyA.fa.gz"
-polyG="/mnt/lustre/working/lab_kateg/grahamM/references/resources/polyG.fa"
-poolseq_oligos="/mnt/lustre/working/lab_kateg/grahamM/references/resources/poolseq-oligos.fa"
-
-
-process TRIM {
-
-  // on m3 bbmap loaded as module. At QIMR local install.
-  // !! test if this breaks - it does! Just use local install
-  // module 'bbmap/38.81'
-
-  // files are published relative to script directory
-  publishDir 'sequence/trimmed_fastq', mode: 'copy'
-
-  input:
-  tuple val(sampleID), path(fastqfile)
-
-  output:
-  tuple val(sampleID), path("${sampleID}.trimmed.fastq.gz")
-
-  script:
-  """
-  bbduk.sh in=${fastqfile} \
-  out=${sampleID}.trimmed.fastq \
-  ref=${polyA},${adapters},${polyG},${poolseq_oligos}
-
-  gzip ${sampleID}.trimmed.fastq
-  """
-}
-
 process FASTP {
+
+  label 'small'
 
   module 'fastp/0.23.2'
 
-  publishDir 'sequence/fastp', mode: 'copy'
+  publishDir "sequence/fastp", mode: 'copy'
 
   input:
   tuple val(sampleID), path(fastqfile)
@@ -192,11 +170,14 @@ process FASTP {
 
 process ALIGN {
 
-  // module 'star/2.5.2b' //m3
-  module 'STAR/2.7.9a'
+  label 'star_align'
+
+
+  // try with default module
+  module 'STAR'
 
   // !! fix this to genome variable in future
-  publishDir 'aligned/mm10', mode: 'copy'
+  publishDir "aligned/mm10", mode: 'copy'
 
   input:
   tuple val(sampleID), path(fastqfile)
@@ -229,9 +210,11 @@ process ALIGN {
 
 process WRANGLE_COUNTS_PYTHON {
 
-  // Source env outside of running nextflow source ~/gm/python_envs/py387_stat_env/bin/activate
+  label 'small'
 
-  publishDir 'summary_counts', mode: 'copy'
+  module 'python'
+
+  publishDir "summary_counts", mode: 'copy'
 
   input:
   path(count_files)
