@@ -32,10 +32,7 @@ params.genome = "/fs03/ha66/references/STAR-index2/iGenomes/Mus_musculus/UCSC/mm
 // NOT FIXED. STILL WRITING TO HOME FOLDER
 
 // global params
-workDir = params.outDir +"/work"
-pubDir = params.outDir
 fastqFiles = params.fastqFolder + "/**/*L00${(1..params.lanes)}*_R1*.fastq.gz"
-// params.outDir = "~"
 params.help = false
 
 
@@ -83,7 +80,7 @@ process COPY_RAW_DATA {
 
   label 'small'
 
-  publishDir "sequence/fastq_files", mode: 'copy'
+  publishDir "sequence/fastq_files", mode: "link", overwrite: true
 
   input:
   path(file)
@@ -105,7 +102,7 @@ process CONCAT_FASTQ {
   label 'small'
 
   // files are published relative to script directory
-  publishDir "sequence/concatenated_fastq", mode: 'copy'
+  publishDir "sequence/concatenated_fastq", mode: "link", overwrite: true
 
   input:
   tuple val(sampleID), path(files)
@@ -125,7 +122,7 @@ process FASTQC {
 
   module 'fastqc/0.12.1'
 
-  publishDir "sequence/fastqc", mode: 'copy'
+  publishDir "sequence/fastqc", mode: "link", overwrite: true
   
   input:
   tuple val(sampleID), path(concatenated_fastq)
@@ -147,7 +144,7 @@ process FASTP {
 
   module 'fastp/0.23.2'
 
-  publishDir "sequence/fastp", mode: 'copy'
+  publishDir "sequence/fastp", mode: "link", overwrite: true
 
   input:
   tuple val(sampleID), path(fastqfile)
@@ -177,13 +174,13 @@ process ALIGN {
   module 'STAR'
 
   // !! fix this to genome variable in future
-  publishDir "aligned/mm10", mode: 'copy'
+  publishDir "aligned/mm10", mode: "link", overwrite: true
 
   input:
   tuple val(sampleID), path(fastqfile)
 
   output:
-  path("${sampleID}_Aligned.sortedByCoord.out.bam")
+  tuple val(sampleID), path("${sampleID}_Aligned.sortedByCoord.out.bam"), emit: bam_files
   path("${sampleID}_Log.final.out")
   path("${sampleID}_Log.out")
   path("${sampleID}_Log.progress.out")
@@ -214,7 +211,7 @@ process WRANGLE_COUNTS_PYTHON {
 
   module 'python'
 
-  publishDir "summary_counts", mode: 'copy'
+  publishDir "summary_counts", mode: "link", overwrite: true
 
   input:
   path(count_files)
@@ -262,6 +259,118 @@ process WRANGLE_COUNTS_PYTHON {
   """
 }
 
+process SORT_FOR_PRESEQ {
+
+  label 'small'
+
+  module 'bedtools'
+
+  publishDir "bed_files", mode: 'link'
+
+  input:
+  tuple val(sampleID), path(bamfile)
+
+  output:
+  tuple val(sampleID), path("${sampleID}.sorted.bed"), emit: sorted_bed
+
+  script:
+  """
+  bedtools bamtobed -i ${bamfile} > ${sampleID}.bed
+  sort -k 1,1 -k 2,2n -k 3,3n -k 6,6 ${sampleID}.bed > ${sampleID}.sorted.bed
+  """
+}
+
+process PRESEQ_C_CURVE {
+
+  /*
+   *  Generate the complexity curve
+   */
+
+  label 'small'
+
+  publishDir 'preseq', mode: 'link'
+
+  input:
+  tuple val(sampleID), path(bedFile)
+
+  output:
+  tuple val(sampleID), path("${sampleID}_output.txt"), emit: c_curve_output
+
+  script:
+  """
+  preseq c_curve -o ${sampleID}_output.txt ${bedFile}
+  """
+}
+
+process PRESEQ_LC_EXTRAP {
+
+  label 'small'
+
+  publishDir 'preseq', mode: 'link'
+
+  input:
+  tuple val(sampleID), path(bedFile)
+
+  output:
+  path("*")
+
+  script:
+  """
+  preseq lc_extrap -o ${sampleID}_future_yield.txt ${bedFile}
+  """
+}
+
+process PRESEQ_BOUND_POP {
+
+  label 'small'
+
+  publishDir 'preseq', mode: 'link'
+
+  input:
+  tuple val(sampleID), path(bedFile)
+
+  output:
+  path("*")
+
+  script:
+  """
+  preseq bound_pop -o ${sampleID}_species_richness.txt ${bedFile}
+  """
+}
+
+process PLOT_C_CURVE {
+
+  label 'small'
+
+  publishDir "preseq/plots", mode: 'link'
+
+  module 'python/3.9.13'
+
+  input:
+  tuple val(sampleID), path(c_curve_output)
+
+  output:
+  path("*")
+
+  script:
+  """
+  #!/usr/bin/env python
+
+  import matplotlib.pyplot as plt 
+  import pandas as pd
+
+  df = pd.read_csv("${c_curve_output}", header = 'infer', delim_whitespace = True)
+
+  plt.plot(df["total_reads"], df["total_reads"], label="hypothetical")
+  plt.plot(df["total_reads"], df["distinct_reads"], label="${sampleID}")
+  plt.xlabel("Total reads (M)")
+  plt.ylabel("Distinct reads (M)")
+  plt.legend(loc="upper left")
+  plt.title("Complexity analysis")
+  plt.savefig("${sampleID}_c_curve.png")
+  """
+}
+
 
 
 workflow {
@@ -284,6 +393,10 @@ workflow {
   
   // Pass only gene counts from ALIGN
   ALIGN.out.gene_counts | collect | WRANGLE_COUNTS_PYTHON
+
+  ALIGN.out.bam_files | SORT_FOR_PRESEQ | (PRESEQ_C_CURVE & PRESEQ_LC_EXTRAP & PRESEQ_BOUND_POP)
+
+  PRESEQ_C_CURVE.out.c_curve_output | PLOT_C_CURVE
 }
 
 
