@@ -35,6 +35,10 @@ params.genome = "/fs03/ha66/references/STAR-index2/iGenomes/Mus_musculus/UCSC/mm
 fastqFiles = params.fastqFolder + "/**/*L00${(1..params.lanes)}*_R1*.fastq.gz"
 params.help = false
 
+// limit input files for testing
+params.dev = false
+params.number_of_inputs = 2
+
 
 
 if (params.help) {
@@ -371,17 +375,45 @@ process PLOT_C_CURVE {
   """
 }
 
+// process MULTIQC {
+
+//   debug true
+
+//   label 'small'
+
+//   publishDir 'sequence/multiqc'
+
+//   module 'singularity/3.7.1'
+
+//   input:
+//   path(output_directory)
+
+//   output:
+//   path('*')
+
+//   script:
+//   """
+//   singularity run /mnt/lustre/working/lab_kateg/grahamM/software/singularity/multiqc-1.20.sif ${output_directory}
+//   """
+
+// }
+
 
 
 workflow {
   
   // create copy of raw data in output directory
   raw_data_ch = Channel.fromPath(params.fastqFolder + "/**/*.fastq.gz")
+  .take( params.dev ? params.number_of_inputs : -1 )
+  
   COPY_RAW_DATA(raw_data_ch)
 
   
   // MAIN
   fastq_ch = Channel.fromFilePairs(fastqFiles, size: params.lanes) 
+   .take( params.dev ? params.number_of_inputs : -1 )
+
+
   concat_fastq_ch = CONCAT_FASTQ(fastq_ch)
 
   // pass concatenated fastq into two streams
@@ -397,6 +429,9 @@ workflow {
   ALIGN.out.bam_files | SORT_FOR_PRESEQ | (PRESEQ_C_CURVE & PRESEQ_LC_EXTRAP & PRESEQ_BOUND_POP)
 
   PRESEQ_C_CURVE.out.c_curve_output | PLOT_C_CURVE
+
+  // // MultiQC
+  // Channel.fromPath(params.outDir) { it.getParent() } | MULTIQC
 }
 
 
